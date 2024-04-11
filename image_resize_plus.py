@@ -2,21 +2,14 @@ from typing import Literal
 from PIL import Image
 
 
-from invokeai.app.services.image_records.image_records_common import ImageCategory, ResourceOrigin
-from invokeai.app.invocations.baseinvocation import (
+from invokeai.invocation_api import (
     BaseInvocation,
     InputField,
     invocation,
     InvocationContext,
-    WithMetadata,
-    WithWorkflow,
-)
-
-from invokeai.app.invocations.primitives import (
     ImageField,
     ImageOutput
 )
-
 
 PIL_RESAMPLING_MODES = Literal[
     "nearest",
@@ -53,7 +46,7 @@ RESIZE_MODES = Literal[
     category="image",
     version="1.0.0",
 )
-class ResizeImagePlusInvocation(BaseInvocation, WithMetadata, WithWorkflow):
+class ResizeImagePlusInvocation(BaseInvocation):
     """Resizes an image to specific dimensions"""
     image: ImageField = InputField(default=None, description="Image to be resize")
     width: int = InputField(default=512., description="The width to resize to (px)")
@@ -72,27 +65,16 @@ class ResizeImagePlusInvocation(BaseInvocation, WithMetadata, WithWorkflow):
             "crop": self.crop,
         }
 
-        image = context.services.images.get_pil_image(self.image.image_name)
+        image = context.images.get_pil(self.image.image_name)
+
         resample_mode = PIL_RESAMPLING_MAP[self.resample_mode]
         image_resize = RESIZE_MODES_MAP[self.resize_mod]
 
         image_out = image_resize(resample_mode, image)
 
-        image_dto = context.services.images.create(
-            image=image_out,
-            image_origin=ResourceOrigin.INTERNAL,
-            image_category=ImageCategory.GENERAL,
-            node_id=self.id,
-            session_id=context.graph_execution_state_id,
-            is_intermediate=self.is_intermediate,
-            workflow=self.workflow,
-        )
-
-        return ImageOutput(
-            image=ImageField(image_name=image_dto.image_name),
-            width=image_dto.width,
-            height=image_dto.height,
-        )
+        image_dto = context.images.save(image=image_out)
+        
+        return ImageOutput.build(image_dto)
         
 
 
