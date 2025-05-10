@@ -73,11 +73,6 @@ class ResizeImagePlusInvocation(BaseInvocation):
         image_out = image_resize(resample_mode, image)
 
         image_dto = context.images.save(image=image_out)
-<<<<<<< HEAD
-=======
-        
-        return ImageOutput.build(image_dto)
->>>>>>> b548f74ad3b014a3d4c58e10ce76a9e0ced8955f
         
         return ImageOutput.build(image_dto)
         
