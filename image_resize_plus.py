@@ -2,21 +2,14 @@ from typing import Literal
 from PIL import Image
 
 
-from invokeai.app.services.image_records.image_records_common import ImageCategory, ResourceOrigin
-from invokeai.app.invocations.baseinvocation import (
+from invokeai.invocation_api import (
     BaseInvocation,
     InputField,
     invocation,
     InvocationContext,
-    WithMetadata,
-    WithWorkflow,
-)
-
-from invokeai.app.invocations.primitives import (
     ImageField,
     ImageOutput
 )
-
 
 PIL_RESAMPLING_MODES = Literal[
     "nearest",
@@ -51,16 +44,16 @@ RESIZE_MODES = Literal[
     title="Image Resize Plus",
     tags=["image", "resize"],
     category="image",
-    version="1.0.0",
+    version="1.1.0",
 )
-class ResizeImagePlusInvocation(BaseInvocation, WithMetadata, WithWorkflow):
+class ResizeImagePlusInvocation(BaseInvocation):
     """Resizes an image to specific dimensions"""
     image: ImageField = InputField(default=None, description="Image to be resize")
     width: int = InputField(default=512., description="The width to resize to (px)")
     height: int = InputField(default=512., description="The height to resize to (px)")
     resample_mode: PIL_RESAMPLING_MODES = InputField(default="bicubic", description="The resampling mode")
     resize_mod: RESIZE_MODES = InputField(default="fit", description="The resize mode")
-
+    multiple: int = InputField(default=0, description="If set, rounds width and height to nearest multiple of this value")
 
 
     def invoke(self, context: InvocationContext) -> ImageOutput:
@@ -72,28 +65,25 @@ class ResizeImagePlusInvocation(BaseInvocation, WithMetadata, WithWorkflow):
             "crop": self.crop,
         }
 
-        image = context.services.images.get_pil_image(self.image.image_name)
+        image = context.images.get_pil(self.image.image_name)
+
         resample_mode = PIL_RESAMPLING_MAP[self.resample_mode]
         image_resize = RESIZE_MODES_MAP[self.resize_mod]
 
         image_out = image_resize(resample_mode, image)
 
-        image_dto = context.services.images.create(
-            image=image_out,
-            image_origin=ResourceOrigin.INTERNAL,
-            image_category=ImageCategory.GENERAL,
-            node_id=self.id,
-            session_id=context.graph_execution_state_id,
-            is_intermediate=self.is_intermediate,
-            workflow=self.workflow,
-        )
-
-        return ImageOutput(
-            image=ImageField(image_name=image_dto.image_name),
-            width=image_dto.width,
-            height=image_dto.height,
-        )
+        image_dto = context.images.save(image=image_out)
         
+        return ImageOutput.build(image_dto)
+        
+
+    def __round(self, size: tuple[int, int]) -> tuple[int, int]:
+        width, height = size
+        if self.multiple > 0:
+            def r(v: int) -> int:
+                return int(round(v / self.multiple) * self.multiple)
+            return r(width), r(height)
+        return int(width), int(height)
 
 
     def fill(self, resample_mode, image):
@@ -106,6 +96,8 @@ class ResizeImagePlusInvocation(BaseInvocation, WithMetadata, WithWorkflow):
         
         new_width = int(original_width * resize_ratio)
         new_height = int(original_height * resize_ratio)
+        new_width, new_height = self.__round((new_width, new_height))
+
         resized_image = image.resize((new_width, new_height), resample_mode)
         
         final_image = Image.new('RGBA', (self.width, self.height), (0, 0, 0, 0))
@@ -134,6 +126,7 @@ class ResizeImagePlusInvocation(BaseInvocation, WithMetadata, WithWorkflow):
         else:
             width = int(height * resize_ratio)
 
+        width, height = self.__round((width, height))
         final_image = image.resize((width, height), resample_mode)
         
         return final_image
@@ -149,6 +142,7 @@ class ResizeImagePlusInvocation(BaseInvocation, WithMetadata, WithWorkflow):
 
         new_width = int(scale_ratio * original_width)
         new_height = int(scale_ratio * original_height)
+        new_width, new_height = self.__round((new_width, new_height))
 
         resized_image = image.resize((new_width, new_height), resample_mode)
 
@@ -165,7 +159,8 @@ class ResizeImagePlusInvocation(BaseInvocation, WithMetadata, WithWorkflow):
 
     def crop(self, resample_mode, image):
         original_width, original_height = image.size
-        
+        self.width, self.height = self.__round((self.width, self.height))
+
         final_image = Image.new('RGBA', (self.width, self.height), (0, 0, 0, 0))
 
         x = (self.width - original_width) // 2
